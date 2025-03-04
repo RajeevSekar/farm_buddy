@@ -5,6 +5,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart';
 import 'package:image/image.dart' as img;
+import 'package:tflite/tflite.dart';
+//import 'package:flutter_tflite/flutter_tflite.dart';
+import 'dart:developer' as devtools;
 
 void main() {
   runApp(MyApp());
@@ -51,6 +54,21 @@ class _ImagePreprocessingScreenState extends State<ImagePreprocessingScreen> {
       _imageFile = savedImage;
       _isProcessing = false; // Hide "Processing..." message
     });
+
+    var recognitions = await Tflite.runModelOnImage(
+        path: savedImage.path,   // required
+        imageMean: 0.0,   // defaults to 117.0
+        imageStd: 255.0,  // defaults to 1.0
+        numResults: 2,    // defaults to 5
+        threshold: 0.2,   // defaults to 0.1
+        asynch: true      // defaults to true
+    );
+
+    if (recognitions == null ) {
+      devtools.log("recognitions is NULL");
+      return;
+    }
+    devtools.log(recognitions.toString());
   }
 
   // Save Image Locally
@@ -86,6 +104,29 @@ class _ImagePreprocessingScreenState extends State<ImagePreprocessingScreen> {
     }
 
     print("Processed Image Data: ${normalizedPixels.sublist(0, 10)} ..."); // Print first 10 values
+  }
+
+  Future<void> _tfliteInit() async {
+    String? res = await Tflite.loadModel(
+        model: "assets/model.tflite",
+        labels: "assets/labels.txt",
+        numThreads: 1, // defaults to 1
+        isAsset: true, // defaults to true, set to false to load resources outside assets
+        useGpuDelegate: false // defaults to false, set to true to use GPU delegate
+    );
+  }
+  @override
+  void initState() {
+    // TODO: implement initState
+    super.initState();
+    _tfliteInit();
+  }
+
+  @override
+  void dispose() {
+    // TODO: implement dispose
+    super.dispose();
+    Tflite.close();
   }
 
   @override
