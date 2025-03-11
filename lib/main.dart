@@ -5,8 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart';
 import 'package:image/image.dart' as img;
-import 'package:tflite/tflite.dart';
-//import 'package:flutter_tflite/flutter_tflite.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
 import 'dart:developer' as devtools;
 
 void main() {
@@ -25,114 +24,130 @@ class MyApp extends StatelessWidget {
 
 class ImagePreprocessingScreen extends StatefulWidget {
   @override
-  _ImagePreprocessingScreenState createState() => _ImagePreprocessingScreenState();
+  _ImagePreprocessingScreenState createState() =>
+      _ImagePreprocessingScreenState();
 }
 
 class _ImagePreprocessingScreenState extends State<ImagePreprocessingScreen> {
   File? _imageFile;
-  bool _isProcessing = false; // Flag to show processing message
+  bool _isProcessing = false;
+  Interpreter? _interpreter;
+  String _predictionText = "";
 
-  // Pick Image and Preprocess
   Future<void> _pickAndProcessImage(ImageSource source) async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: source);
-
     if (pickedFile == null) return;
 
     setState(() {
-      _isProcessing = true; // Show "Processing..." message
+      _isProcessing = true;
       _imageFile = null;
+      _predictionText = "Processing...";
     });
 
     File tempImage = File(pickedFile.path);
     File savedImage = await _saveImageLocally(tempImage);
-
-    // Process image (resize + normalize)
-    await _preprocessImage(savedImage);
+    List<double> normalizedPixels = await _preprocessImage(savedImage);
 
     setState(() {
       _imageFile = savedImage;
-      _isProcessing = false; // Hide "Processing..." message
     });
 
-    var recognitions = await Tflite.runModelOnImage(
-        path: savedImage.path,   // required
-        imageMean: 0.0,   // defaults to 117.0
-        imageStd: 255.0,  // defaults to 1.0
-        numResults: 2,    // defaults to 5
-        threshold: 0.2,   // defaults to 0.1
-        asynch: true      // defaults to true
-    );
+    // Prepare input tensor
+    var inputTensor = _reshapeInput(normalizedPixels, 224, 224, 3);
 
-    if (recognitions == null ) {
-      devtools.log("recognitions is NULL");
-      return;
+    // Updated output tensor shape: [1, 1] instead of [1, 2]
+    List<List<double>> outputTensor = List.generate(1, (_) => List.filled(1, 0.0));
+
+    try {
+      _interpreter?.run(inputTensor, outputTensor);
+
+      double predictionScore = outputTensor[0][0]; // Model output
+      devtools.log("📊 Model Output: $predictionScore");
+
+      setState(() {
+        _predictionText = predictionScore >= 0.5 ? "Unhealthy" : "Healthy";
+        _isProcessing = false;
+      });
+    } catch (e) {
+      devtools.log("❌ Error running model: $e");
+      setState(() {
+        _predictionText = "Error processing image";
+        _isProcessing = false;
+      });
     }
-    devtools.log(recognitions.toString());
   }
 
-  // Save Image Locally
   Future<File> _saveImageLocally(File imageFile) async {
     final directory = await getApplicationDocumentsDirectory();
     final fileName = basename(imageFile.path);
     final localImage = File('${directory.path}/$fileName');
-
     return imageFile.copy(localImage.path);
   }
 
-  // Preprocess Image (Resize to 224x224 & Normalize)
-  Future<void> _preprocessImage(File imageFile) async {
-    // Read image bytes
+  Future<List<double>> _preprocessImage(File imageFile) async {
     List<int> imageBytes = await imageFile.readAsBytes();
-
-    // Decode image using 'image' package
     img.Image? rawImage = img.decodeImage(Uint8List.fromList(imageBytes));
     if (rawImage == null) throw Exception("Failed to decode image");
 
-    // Resize to 224x224
     img.Image resizedImage = img.copyResize(rawImage, width: 224, height: 224);
-
-    // Convert to float32 and normalize (values between 0 and 1)
     List<double> normalizedPixels = [];
-    for (int y = 0; y < 224; y++) {
-      for (int x = 0; x < 224; x++) {
-        final pixel = resizedImage.getPixel(x, y);
-        normalizedPixels.add(pixel.r / 255.0); // Normalize Red
-        normalizedPixels.add(pixel.g / 255.0); // Normalize Green
-        normalizedPixels.add(pixel.b / 255.0); // Normalize Blue
+    for (int y = 0; y < resizedImage.height; y++) {
+      for (int x = 0; x < resizedImage.width; x++) {
+        var pixel = resizedImage.getPixel(x, y);
+        double r = pixel.r / 255.0;
+        double g = pixel.g / 255.0;
+        double b = pixel.b / 255.0;
+        normalizedPixels.add(r);
+        normalizedPixels.add(g);
+        normalizedPixels.add(b);
       }
     }
-
-    print("Processed Image Data: ${normalizedPixels.sublist(0, 10)} ..."); // Print first 10 values
+    return normalizedPixels;
   }
 
-  Future<void> _tfliteInit() async {
-    String? res = await Tflite.loadModel(
-        model: "assets/model.tflite",
-        labels: "assets/labels.txt",
-        numThreads: 1, // defaults to 1
-        isAsset: true, // defaults to true, set to false to load resources outside assets
-        useGpuDelegate: false // defaults to false, set to true to use GPU delegate
-    );
+  List<List<List<List<double>>>> _reshapeInput(
+      List<double> flat, int height, int width, int channels) {
+    List<List<List<List<double>>>> tensor = List.generate(
+        1,
+            (_) => List.generate(
+            height, (_) => List.generate(width, (_) => List.filled(channels, 0.0))));
+    int index = 0;
+    for (int i = 0; i < height; i++) {
+      for (int j = 0; j < width; j++) {
+        for (int k = 0; k < channels; k++) {
+          tensor[0][i][j][k] = flat[index++];
+        }
+      }
+    }
+    return tensor;
   }
+
+  Future<void> _initializeInterpreter() async {
+    try {
+      _interpreter = await Interpreter.fromAsset('assets/model.tflite');
+      print("✅ Interpreter loaded successfully!");
+    } catch (e) {
+      print("❌ Failed to load model: $e");
+    }
+  }
+
   @override
   void initState() {
-    // TODO: implement initState
     super.initState();
-    _tfliteInit();
+    _initializeInterpreter();
   }
 
   @override
   void dispose() {
-    // TODO: implement dispose
+    _interpreter?.close();
     super.dispose();
-    Tflite.close();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Image Preprocessing')),
+      appBar: AppBar(title: Text('Image Classifier')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -142,11 +157,20 @@ class _ImagePreprocessingScreenState extends State<ImagePreprocessingScreen> {
               children: [
                 CircularProgressIndicator(),
                 SizedBox(height: 10),
-                Text("Processing Image...", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))
+                Text("Processing Image...",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))
               ],
             )
                 : _imageFile != null
-                ? Image.file(_imageFile!, height: 300)
+                ? Column(
+              children: [
+                Image.file(_imageFile!, height: 300),
+                SizedBox(height: 10),
+                Text("Prediction: $_predictionText",
+                    style: TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue))
+              ],
+            )
                 : Text('No image selected'),
             SizedBox(height: 20),
             Row(
