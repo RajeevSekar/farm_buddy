@@ -4,11 +4,11 @@
 This is a **Flutter-based mobile application** for detecting Rice Sheath Blight disease using **image classification** and **sensor data analysis**. The app provides two detection modes:
 
 1. **Image Detection** – Uses a **TensorFlow Lite (TFLite) model** to classify images of rice plants as **Healthy** or **Unhealthy**.
-2. **Multimodal Detection** – Combines **image classification** and **sensor data inference** using a **logistic regression model** trained in Python.
+2. **Multimodal Detection** – Combines **image classification** and **sensor data inference** using a **ANN model** trained in Python.
 
 ## Features
 - **Image Classification**: Detects sheath blight disease from an image using a **Convolutional Neural Network (CNN)**.
-- **Sensor-based Inference**: Uses a **trained logistic regression model** to predict disease probability based on sensor inputs:
+- **Sensor-based Inference**: Uses a **trained ANN model** to predict disease probability based on sensor inputs:
   - **Season** (Monsoon, Winter, Summer)
   - **Nitrogen Level**
   - **Soil Moisture**
@@ -20,7 +20,7 @@ This is a **Flutter-based mobile application** for detecting Rice Sheath Blight 
 ## Tech Stack
 - **Flutter** (Dart) for frontend UI
 - **TensorFlow Lite** for image inference
-- **Python (scikit-learn, TensorFlow)** for training logistic regression model
+- **Python (scikit-learn, TensorFlow)** for training model
 - **Image Picker** for capturing/uploading images
 - **TFLite Interpreter** for running inference on-device
 
@@ -68,13 +68,6 @@ flutter:
 flutter run
 ```
 
-## Training the Logistic Regression Model
-1. Train the logistic regression model in Python:
-```python
-python models/logistic_regression.py
-```
-2. Convert and save the model to **TFLite format**.
-
 ## How It Works
 ### **1. Image Detection Mode**
 - Select an image from **camera/gallery**.
@@ -84,7 +77,7 @@ python models/logistic_regression.py
 - Enter **sensor values** in a form.
 - Run inference on:
   - **Image** (CNN model - 75% weight)
-  - **Sensor Data** (Logistic Regression - 25% weight)
+  - **Sensor Data** (ANN - 25% weight)
 - Get the **final fused prediction**.
 
 
