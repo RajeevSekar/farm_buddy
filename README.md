@@ -24,27 +24,10 @@ This is a **Flutter-based mobile application** for detecting Rice Sheath Blight 
 - **Image Picker** for capturing/uploading images
 - **TFLite Interpreter** for running inference on-device
 
-## Project Structure
-```
-📂 rice-sheath-blight-detection
-│── 📂 assets
-│   ├── model.tflite  # CNN model for image classification
-│   ├── log_reg_model.tflite  # Logistic regression model
-│── 📂 lib
-│   ├── main.dart  # Entry point
-│   ├── home_screen.dart  # Home screen with detection options
-│   ├── image_detection_screen.dart  # Image classification screen
-│   ├── multimodal_detection_screen.dart  # Sensor input + fusion logic
-│── 📂 models
-│   ├── logistic_regression.py  # Python script to train logistic regression model
-│── pubspec.yaml  # Flutter dependencies
-│── README.md  # Documentation
-```
-
 ## Installation & Setup
 ### **1. Clone the Repository**
 ```sh
-git clone https://github.com/yourusername/rice-sheath-blight-detection.git
+git clone https://github.com/RajeevSekar.farm_buddy.git
 cd rice-sheath-blight-detection
 ```
 
@@ -54,13 +37,13 @@ flutter pub get
 ```
 
 ### **3. Add Model Files**
-Ensure that `model.tflite` and `log_reg_model.tflite` are placed in the `assets/` folder.
+Ensure that `image_model.tflite` and `ann_model.tflite` are placed in the `assets/` folder.
 Update `pubspec.yaml` to include:
 ```yaml
 flutter:
   assets:
-    - assets/model.tflite
-    - assets/log_reg_model.tflite
+    - assets/image_model.tflite
+    - assets/ann_model.tflite
 ```
 
 ### **4. Run the App**
@@ -74,7 +57,7 @@ flutter run
 - The CNN model classifies the image as **Healthy** or **Unhealthy**.
 
 ### **2. Multimodal Detection Mode**
-- Enter **sensor values** in a form.
+- **Sensor values** are taken from the hardware through bluetooth
 - Run inference on:
   - **Image** (CNN model - 75% weight)
   - **Sensor Data** (ANN - 25% weight)
