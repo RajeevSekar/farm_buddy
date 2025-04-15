@@ -12,9 +12,11 @@ class CustomBluetoothService {
   void listenToData(BluetoothDevice device, Function(String) onDataReceived) async {
     List<BluetoothService> services = await device.discoverServices();
 
+    final targetUUID = Guid("12345678-1234-5678-1234-56789abcdef1");
+
     for (BluetoothService service in services) {
       for (BluetoothCharacteristic characteristic in service.characteristics) {
-        if (characteristic.properties.notify) {
+        if (characteristic.uuid == targetUUID && characteristic.properties.notify) {
           await characteristic.setNotifyValue(true);
           characteristic.value.listen((value) {
             String data = utf8.decode(value);
