@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image/image.dart' as img;
@@ -19,12 +20,10 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
   String _predictionText = "";
   double imageProbability = 0.0;
   double sensorProbability = 0.0;
+  bool _sensorDataFetched = false;
 
   String _selectedSeason = "Monsoon";
-  TextEditingController nitrogenController = TextEditingController();
-  TextEditingController moistureController = TextEditingController();
-  TextEditingController temperatureController = TextEditingController();
-  TextEditingController humidityController = TextEditingController();
+  Map<String, double> _fetchedSensorData = {};
 
   @override
   void initState() {
@@ -49,7 +48,7 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
 
     setState(() {
       _imageFile = File(pickedFile.path);
-      _predictionText = ""; // Reset prediction
+      _predictionText = "";
     });
 
     devtools.log("📷 Image selected");
@@ -66,9 +65,9 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
     for (int y = 0; y < resizedImage.height; y++) {
       for (int x = 0; x < resizedImage.width; x++) {
         var pixel = resizedImage.getPixel(x, y);
-        normalizedPixels.add((pixel.r / 255.0)); // Normalize R
-        normalizedPixels.add((pixel.g / 255.0)); // Normalize G
-        normalizedPixels.add((pixel.b / 255.0)); // Normalize B
+        normalizedPixels.add((pixel.r / 255.0));
+        normalizedPixels.add((pixel.g / 255.0));
+        normalizedPixels.add((pixel.b / 255.0));
       }
     }
 
@@ -77,8 +76,9 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
 
   List<List<List<List<double>>>> _reshapeInput(List<double> flat, int height, int width, int channels) {
     List<List<List<List<double>>>> tensor = List.generate(
-        1,
-            (_) => List.generate(height, (_) => List.generate(width, (_) => List.filled(channels, 0.0))));
+      1,
+          (_) => List.generate(height, (_) => List.generate(width, (_) => List.filled(channels, 0.0))),
+    );
 
     int index = 0;
     for (int i = 0; i < height; i++) {
@@ -91,11 +91,63 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
     return tensor;
   }
 
+  Future<void> _fetchSensorData() async {
+    try {
+      final socket = await Socket.connect('192.168.220.249', 12345).timeout(Duration(seconds: 5));
+      String response = "";
+
+      await socket.listen((List<int> data) {
+        response += String.fromCharCodes(data);
+      }).asFuture();
+
+      socket.destroy();
+
+      RegExp regex = RegExp(r"\{.*\}");
+      final match = regex.firstMatch(response);
+      if (match == null) throw Exception("No JSON found in response");
+
+      String jsonLike = match.group(0)!;
+      jsonLike = jsonLike.replaceAll("'", '"');
+
+      Map<String, dynamic> sensorData = json.decode(jsonLike);
+
+      setState(() {
+        _fetchedSensorData = {
+          "nitrogen": (sensorData["nitrogen"] as num).toDouble(),
+          "moisture": (sensorData["moisture"] as num).toDouble(),
+          "temperature": (sensorData["temperature"] as num).toDouble(),
+          "humidity": (sensorData["humidity"] as num).toDouble(),
+        };
+        _selectedSeason = sensorData["season"];
+        _sensorDataFetched = true;
+      });
+
+      devtools.log("✅ Sensor Data: $_fetchedSensorData, Season: $_selectedSeason");
+    } catch (e) {
+      _showSensorError("Failed to fetch sensor data: $e");
+    }
+  }
+
+  void _showSensorError(String msg) {
+    devtools.log("❌ Sensor data error: $msg");
+    setState(() => _sensorDataFetched = false);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text("Sensor Data Error"),
+        content: Text(msg),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("OK"))],
+      ),
+    );
+  }
+
   Future<void> _runInference() async {
     if (_imageFile == null) {
-      setState(() {
-        _predictionText = "⚠️ Please select an image first!";
-      });
+      setState(() => _predictionText = "⚠️ Please select an image first!");
+      return;
+    }
+    if (!_sensorDataFetched) {
+      setState(() => _predictionText = "⚠️ Please fetch sensor data first!");
       return;
     }
 
@@ -111,27 +163,23 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
 
       _imageInterpreter?.run(inputTensor, outputTensor);
       imageProbability = outputTensor[0][0];
-
       devtools.log("📊 Image Model Output: $imageProbability");
+
+      _runSensorInference();
     } catch (e) {
-      devtools.log("❌ Error processing image: $e");
       setState(() {
-        _predictionText = "Error processing image!";
+        _predictionText = "Error during image processing.";
         _isProcessing = false;
       });
-      return;
     }
-
-    _runSensorInference();
   }
 
-  Future<void> _runSensorInference() async {
-    double nitrogen = double.tryParse(nitrogenController.text) ?? 10.0;
-    double moisture = double.tryParse(moistureController.text) ?? 10.0;
-    double temperature = double.tryParse(temperatureController.text) ?? 25.0;
-    double humidity = double.tryParse(humidityController.text) ?? 60.0;
+  void _runSensorInference() {
+    double nitrogen = _fetchedSensorData["nitrogen"]!;
+    double moisture = _fetchedSensorData["moisture"]!;
+    double temperature = _fetchedSensorData["temperature"]!;
+    double humidity = _fetchedSensorData["humidity"]!;
 
-    // Normalizing sensor inputs using min-max scaling
     double normNitrogen = (nitrogen - 10) / (300 - 10);
     double normMoisture = (moisture - 10) / (60 - 10);
     double normTemperature = (temperature - 25) / (38 - 25);
@@ -148,13 +196,9 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
     List<List<double>> inputTensor = [inputValues];
     List<List<double>> outputTensor = List.generate(1, (_) => [0.0]);
 
-    try {
-      _sensorInterpreter?.run(inputTensor, outputTensor);
-      sensorProbability = outputTensor[0][0];
-      devtools.log("📊 Sensor Model Output: $sensorProbability");
-    } catch (e) {
-      devtools.log("❌ Error running sensor model: $e");
-    }
+    _sensorInterpreter?.run(inputTensor, outputTensor);
+    sensorProbability = outputTensor[0][0];
+    devtools.log("📊 Sensor Model Output: $sensorProbability");
 
     _runFinalPrediction();
   }
@@ -180,54 +224,57 @@ class _MultiModalDetectionScreenState extends State<MultiModalDetectionScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('Multimodal Detection')),
-      body: SingleChildScrollView(
-        padding: EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Center(
-              child: ElevatedButton.icon(
-                icon: Icon(Icons.camera),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                icon: Icon(Icons.camera_alt),
                 label: Text('Pick Image'),
                 onPressed: () => _pickAndProcessImage(ImageSource.gallery),
               ),
-            ),
-            SizedBox(height: 10),
-            _imageFile != null
-                ? Center(child: Image.file(_imageFile!, height: 200))
-                : Text("No image selected", textAlign: TextAlign.center),
-            SizedBox(height: 20),
-
-            // FORM
-            Text("Enter Sensor Data:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            DropdownButton<String>(
-              value: _selectedSeason,
-              items: ["Monsoon", "Winter", "Summer"]
-                  .map((season) => DropdownMenuItem(value: season, child: Text(season)))
-                  .toList(),
-              onChanged: (value) => setState(() => _selectedSeason = value!),
-            ),
-            TextField(controller: nitrogenController, decoration: InputDecoration(labelText: "Nitrogen Level")),
-            TextField(controller: moistureController, decoration: InputDecoration(labelText: "Soil Moisture")),
-            TextField(controller: temperatureController, decoration: InputDecoration(labelText: "Soil Temperature")),
-            TextField(controller: humidityController, decoration: InputDecoration(labelText: "Soil Humidity")),
-            SizedBox(height: 20),
-
-            Center(
-              child: ElevatedButton.icon(
-                icon: Icon(Icons.science),
-                label: Text('Run Multimodal Detection'),
+              SizedBox(height: 10),
+              _imageFile != null
+                  ? Image.file(_imageFile!, height: 200)
+                  : Text("No image selected"),
+              SizedBox(height: 20),
+              Text("Select Season:", style: TextStyle(fontWeight: FontWeight.bold)),
+              DropdownButton<String>(
+                value: _selectedSeason,
+                items: ["Monsoon", "Winter", "Summer"]
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                    .toList(),
+                onChanged: (v) => setState(() => _selectedSeason = v!),
+              ),
+              SizedBox(height: 10),
+              ElevatedButton.icon(
+                icon: Icon(Icons.sensors),
+                label: Text("Fetch Sensor Data"),
+                onPressed: _fetchSensorData,
+              ),
+              SizedBox(height: 10),
+              _sensorDataFetched
+                  ? Column(
+                children: [
+                  Text("🌡 Temp: ${_fetchedSensorData["temperature"]?.toStringAsFixed(2)}°C"),
+                  Text("💧 Humidity: ${_fetchedSensorData["humidity"]?.toStringAsFixed(2)}%"),
+                  Text("🌱 Moisture: ${_fetchedSensorData["moisture"]?.toStringAsFixed(2)}"),
+                  Text("🧪 Nitrogen: ${_fetchedSensorData["nitrogen"]?.toStringAsFixed(2)}"),
+                ],
+              )
+                  : Text("No sensor data fetched."),
+              SizedBox(height: 20),
+              ElevatedButton.icon(
+                icon: Icon(Icons.play_arrow),
+                label: Text("Run Inference"),
                 onPressed: _runInference,
               ),
-            ),
-            SizedBox(height: 20),
-
-            Text(
-              "Prediction: $_predictionText",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-          ],
+              SizedBox(height: 20),
+              Text("Prediction: $_predictionText", style: TextStyle(fontSize: 18)),
+            ],
+          ),
         ),
       ),
     );
